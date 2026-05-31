@@ -28,6 +28,10 @@
               <el-icon><Picture /></el-icon>
               <span>素材管理</span>
             </el-menu-item>
+            <el-menu-item index="/ai-creator">
+              <el-icon><MagicStick /></el-icon>
+              <span>AI 创作</span>
+            </el-menu-item>
             <el-menu-item index="/publish-center">
               <el-icon><Upload /></el-icon>
               <span>发布中心</span>
@@ -63,7 +67,7 @@ import { ref, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import {
   HomeFilled, User, DataAnalysis,
-  Fold, Picture, Upload
+  Fold, Picture, Upload, MagicStick
 } from '@element-plus/icons-vue'
 
 const route = useRoute()

@@ -713,5 +713,140 @@ def sse_stream(status_queue):
             # 避免 CPU 占满
             time.sleep(0.1)
 
+# ========== AI 创作者中心 ==========
+
+@app.route('/api/ai/generate', methods=['POST'])
+def ai_generate():
+    """根据素材类型生成提示词、标题、话题建议"""
+    import subprocess, json, tempfile, os, base64, requests as http_req
+    from myUtils.auth import check_cookie
+
+    data = request.get_json()
+    material_type = data.get('type')   # url | image | text | video
+    content = data.get('content', '')  # URL 或文本内容
+    platform = data.get('platform', 'douyin')  # douyin | xiaohongshu
+
+    # 系统提示词
+    SYSTEM_PROMPT = """你是一个专业的短视频内容策划师，擅长根据素材为抖音/小红书平台生成爆款内容方案。
+请根据用户提供的素材，分析并生成以下内容（严格使用中文输出）：
+
+1. **视频提示词（Video Prompt）**
+   - 用于 AI 生成视频的核心描述词，50-150字
+   - 风格、氛围、画面重点、运镜方式
+
+2. **标题建议**
+   - 5个爆款标题选项（带序号）
+   - 每个标题控制在20字以内
+   - 带话题标签格式如：#话题
+
+3. **话题建议**
+   - 10个相关话题标签
+   - 格式：#话题名
+
+4. **内容分析**
+   - 素材的核心卖点（50字内）
+   - 适合的受众群体
+   - 最佳发布时段建议
+
+输出格式（严格按此格式，不要添加额外说明）：
+```
+[PROMPT]
+（视频提示词内容）
+[/PROMPT]
+
+[TITLES]
+1. 标题1
+2. 标题2
+3. 标题3
+4. 标题4
+5. 标题5
+[/TITLES]
+
+[TOPICS]
+#话题1 #话题2 #话题3 #话题4 #话题5 #话题6 #话题7 #话题8 #话题9 #话题10
+[/TOPICS]
+
+[ANALYSIS]
+卖点：（50字内）
+受众：（30字内）
+时段：（20字内）
+[/ANALYSIS]
+```"""
+
+    try:
+        # 1. 图片/视频：先下载并转 base64
+        if material_type == 'image' and content.startswith('data:'):
+            # 前端传来的 base64
+            b64_data = content.split(',')[1]
+            user_prompt = f"[用户上传了图片素材]\n请分析这张图片，生成内容方案。"
+            payload = json.dumps([{"role": "user", "content": user_prompt, "image_urls": [f"data:image/jpeg;base64,{b64_data}"]}])
+        elif material_type == 'image' and content.startswith('http'):
+            user_prompt = f"[用户提供了图片链接：{content}]\n请分析这张图片，生成内容方案。"
+            payload = json.dumps([{"role": "user", "content": user_prompt}])
+        elif material_type == 'video' and content.startswith('data:'):
+            # 视频 base64（偏大，一般不推荐）
+            user_prompt = "[用户上传了视频素材]\n请分析这个视频内容，生成内容方案。"
+            payload = json.dumps([{"role": "user", "content": user_prompt}])
+        elif material_type == 'video' and content.startswith('http'):
+            user_prompt = f"[用户提供了视频链接：{content}]\n请分析这个视频内容，生成内容方案。"
+            payload = json.dumps([{"role": "user", "content": user_prompt}])
+        elif material_type == 'url':
+            user_prompt = f"[用户提供了素材链接：{content}]\n请分析这个链接的内容，生成内容方案。"
+            payload = json.dumps([{"role": "user", "content": user_prompt}])
+        elif material_type == 'text':
+            user_prompt = f"[用户提供了文本素材：\n{content}]\n请分析这段文本，生成内容方案。"
+            payload = json.dumps([{"role": "user", "content": user_prompt}])
+        else:
+            return jsonify({"error": "不支持的素材类型或内容为空"}), 400
+
+        full_payload = json.dumps([{"role": "system", "content": SYSTEM_PROMPT}])
+        import copy
+        messages = json.loads(full_payload)
+        user_msgs = json.loads(payload)
+        messages.extend(user_msgs)
+
+        # 读取 MiniMax API Key
+        config_path = os.path.expanduser("~/.mmx/config.json")
+        api_key = None
+        if os.path.exists(config_path):
+            with open(config_path) as f:
+                cfg = json.load(f)
+                api_key = cfg.get("api_key")
+
+        if not api_key:
+            return jsonify({"error": "未配置 MiniMax API Key，请联系管理员"}), 500
+
+        # 调用 MiniMax 文本 API
+        req = http_req.post(
+            "https://api.minimaxi.com/v1/text/chatcompletion_v2",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json"
+            },
+            json={
+                "model": "MiniMax-M2.7",
+                "messages": messages,
+                "max_tokens": 1500,
+                "temperature": 0.7
+            },
+            timeout=60
+        )
+        result = req.json()
+        if req.status_code != 200:
+            return jsonify({"error": f"MiniMax API 错误: {result.get('error', {}).get('message', str(result))}"}), 502
+
+        reply = result["choices"][0]["message"]["content"]
+        return jsonify({"success": True, "content": reply})
+
+    except http_req.exceptions.Timeout:
+        return jsonify({"error": "AI 生成超时，请重试"}), 504
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": f"生成失败: {str(e)}"}), 500
+
+
+# ========== end AI 创作者中心 ==========
+
 if __name__ == '__main__':
     app.run(host='0.0.0.0' ,port=5409)

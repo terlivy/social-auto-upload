@@ -540,11 +540,16 @@ class DouYinVideo(DouYinBaseUploader):
         if self.publish_strategy == DOUYIN_PUBLISH_STRATEGY_SCHEDULED and self.publish_date != 0:
             await self.set_schedule_time_douyin(page, self.publish_date)
 
-        while True:
+        publish_clicked = False
+        retry_count = 0
+        while retry_count < 30:
             try:
-                publish_button = page.get_by_role("button", name="发布", exact=True)
-                if await publish_button.count():
-                    await publish_button.click()
+                if not publish_clicked:
+                    publish_button = page.get_by_role("button", name="发布", exact=True)
+                    if await publish_button.count():
+                        await publish_button.click()
+                # 点击后立即标记，避免超时异常时下一轮重复点击
+                publish_clicked = True
                 await page.wait_for_url(
                     "https://creator.douyin.com/creator-micro/content/manage**",
                     timeout=3000,
@@ -552,11 +557,23 @@ class DouYinVideo(DouYinBaseUploader):
                 douyin_logger.success(_msg("🥳", "视频发布成功，小人开心收工"))
                 break
             except Exception:
+                retry_count += 1
+                if not publish_clicked:
+                    # 极端情况下按钮还没渲染出来，再等一秒
+                    await asyncio.sleep(1)
+                    continue
+                # SPA 不会触发传统导航，改为检查发布按钮是否消失（表示提交成功）
+                publish_btn = page.get_by_role("button", name="发布", exact=True)
+                if await publish_btn.count() == 0:
+                    douyin_logger.success(_msg("🥳", "视频发布成功，小人开心收工"))
+                    break
                 await self.handle_auto_video_cover(page)
-                douyin_logger.info(_msg("🏃", "小人正在冲刺发布视频"))
+                douyin_logger.info(_msg("🏃", f"小人正在冲刺发布视频（已尝试{retry_count}次）"))
                 if self.debug:
                     await page.screenshot(full_page=True)
-                await asyncio.sleep(0.5)
+                await asyncio.sleep(1)
+        else:
+            douyin_logger.warning(_msg("😵", "发布循环超时，视为草稿保存"))
 
         await context.storage_state(path=self.account_file)
         douyin_logger.success(_msg("🥳", "cookie 更新完毕"))

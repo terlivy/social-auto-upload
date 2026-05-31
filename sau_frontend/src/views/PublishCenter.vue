@@ -491,12 +491,13 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { Upload, Plus, Close, Folder } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { useAccountStore } from '@/stores/account'
 import { useAppStore } from '@/stores/app'
 import { materialApi } from '@/api/material'
+import { accountApi } from '@/api/account'
 import { http } from '@/utils/request'
 
 // API base URL
@@ -592,6 +593,23 @@ const availableAccounts = computed(() => {
   const currentPlatform = currentTab.value ? platformMap[currentTab.value.selectedPlatform] : null
   return currentPlatform ? accountStore.accounts.filter(acc => acc.platform === currentPlatform) : []
 })
+
+// 页面挂载时加载账号列表
+onMounted(() => {
+  fetchAccountsQuick()
+})
+
+// 快速加载账号（不验证 cookie）
+const fetchAccountsQuick = async () => {
+  try {
+    const res = await accountApi.getAccounts()
+    if (res.code === 200 && res.data) {
+      accountStore.setAccounts(res.data)
+    }
+  } catch (error) {
+    console.error('加载账号失败:', error)
+  }
+}
 
 // 话题相关状态
 const topicDialogVisible = ref(false)
@@ -728,7 +746,7 @@ const confirmTopicSelection = () => {
 // 打开账号选择弹窗
 const openAccountDialog = (tab) => {
   currentTab.value = tab
-  tempSelectedAccounts.value = [...tab.selectedAccounts]
+  tempSelectedAccounts.value = tab.selectedAccounts.slice()
   accountDialogVisible.value = true
 }
 

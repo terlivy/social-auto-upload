@@ -335,8 +335,8 @@
             />
           </div>
 
-          <!-- 视频封面（仅抖音可见） -->
-          <div v-if="tab.selectedPlatform === 3" class="cover-section">
+          <!-- 视频封面 -->
+          <div class="cover-section">
             <h3>视频封面</h3>
             <div class="cover-upload">
               <el-upload
@@ -883,7 +883,7 @@ const confirmPublish = async (tab) => {
   }
 
   // 如果有封面，先上传封面图片
-  if (tab.coverFile && tab.selectedPlatform === 3) {
+  if (tab.coverFile) {
     try {
       const formData = new FormData()
       // 将 base64 转回文件

@@ -3,6 +3,7 @@ import Dashboard from '../views/Dashboard.vue'
 import AccountManagement from '../views/AccountManagement.vue'
 import MaterialManagement from '../views/MaterialManagement.vue'
 import PublishCenter from '../views/PublishCenter.vue'
+import PublishRecords from '../views/PublishRecords.vue'
 import AICreatorCenter from '../views/AICreatorCenter.vue'
 import About from '../views/About.vue'
 
@@ -22,7 +23,7 @@ const routes = [
     name: 'MaterialManagement',
     component: MaterialManagement
   },
-    {
+  {
     path: '/ai-creator',
     name: 'AICreatorCenter',
     component: AICreatorCenter
@@ -31,6 +32,11 @@ const routes = [
     path: '/publish-center',
     name: 'PublishCenter',
     component: PublishCenter
+  },
+  {
+    path: '/publish-records',
+    name: 'PublishRecords',
+    component: PublishRecords
   },
   {
     path: '/about',

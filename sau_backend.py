@@ -850,18 +850,82 @@ def ai_generate():
 
 @app.route('/getPublishRecords', methods=['GET'])
 def get_publish_records():
-    """获取发布记录"""
+    """获取发布记录，支持筛选和分页"""
     try:
+        page = int(request.args.get('page', 1))
+        page_size = int(request.args.get('page_size', 20))
+        platform = request.args.get('platform', '')
+        status = request.args.get('status', '')
+        keyword = request.args.get('keyword', '')
+        start_date = request.args.get('start_date', '')
+        end_date = request.args.get('end_date', '')
+
         conn = sqlite3.connect(str(BASE_DIR / 'database.db'))
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
-        cur.execute("SELECT * FROM publish_records ORDER BY created_at DESC LIMIT 50")
+
+        # WHERE 条件
+        conditions = []
+        params = []
+        if platform:
+            conditions.append('platform = ?')
+            params.append(platform)
+        if status:
+            conditions.append('status = ?')
+            params.append(status)
+        if keyword:
+            conditions.append('title LIKE ?')
+            params.append(f'%{keyword}%')
+        if start_date:
+            conditions.append('date(created_at) >= ?')
+            params.append(start_date)
+        if end_date:
+            conditions.append('date(created_at) <= ?')
+            params.append(end_date)
+
+        where_clause = ' AND '.join(conditions) if conditions else '1=1'
+
+        # 总数
+        cur.execute(f'SELECT COUNT(*) as cnt FROM publish_records WHERE {where_clause}', params)
+        total = cur.fetchone()['cnt']
+
+        # 成功/失败数
+        cur.execute(f'SELECT status, COUNT(*) as cnt FROM publish_records WHERE {where_clause} GROUP BY status', params)
+        stat_rows = cur.fetchall()
+        success_count = sum(r['cnt'] for r in stat_rows if r['status'] == 1)
+        fail_count = sum(r['cnt'] for r in stat_rows if r['status'] == 2)
+
+        # 分页数据
+        offset = (page - 1) * page_size
+        cur.execute(
+            f'SELECT * FROM publish_records WHERE {where_clause} ORDER BY created_at DESC LIMIT ? OFFSET ?',
+            [*params, page_size, offset]
+        )
         rows = cur.fetchall()
         conn.close()
+
         records = [dict(row) for row in rows]
-        return jsonify({"code": 200, "data": records})
+        return jsonify({
+            'code': 200, 'data': records, 'total': total,
+            'success_count': success_count, 'fail_count': fail_count
+        })
     except Exception as e:
-        return jsonify({"code": 500, "msg": str(e)}), 500
+        traceback.print_exc()
+        return jsonify({'code': 500, 'msg': str(e)}), 500
+
+@app.route('/deletePublishRecord', methods=['DELETE'])
+def delete_publish_record():
+    """删除单条发布记录"""
+    try:
+        rid = request.args.get('id')
+        conn = sqlite3.connect(str(BASE_DIR / 'database.db'))
+        cur = conn.cursor()
+        cur.execute('DELETE FROM publish_records WHERE id = ?', (rid,))
+        conn.commit()
+        conn.close()
+        return jsonify({'code': 200, 'msg': 'ok'})
+    except Exception as e:
+        return jsonify({'code': 500, 'msg': str(e)}), 500
 
 @app.route('/savePublishRecord', methods=['POST'])
 def save_publish_record():

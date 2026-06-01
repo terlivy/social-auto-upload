@@ -314,7 +314,7 @@
             />
           </div>
 
-          <!-- 标签 (仅在抖音可见) -->
+          <!-- 商品链接（仅抖音可见） -->
           <div v-if="tab.selectedPlatform === 3" class="product-section">
             <h3>商品链接</h3>
             <el-input
@@ -333,6 +333,36 @@
               maxlength="200"
               class="product-link-input"
             />
+          </div>
+
+          <!-- 视频封面（仅抖音可见） -->
+          <div v-if="tab.selectedPlatform === 3" class="cover-section">
+            <h3>视频封面</h3>
+            <div class="cover-upload">
+              <el-upload
+                v-if="!tab.coverFile"
+                class="cover-uploader"
+                :auto-upload="false"
+                :show-file-list="false"
+                accept="image/*"
+                :on-change="(uploadFile, uploadFiles) => handleCoverChange(uploadFile, tab)"
+                :limit="1"
+              >
+                <el-button type="primary" plain size="small">
+                  <el-icon><Picture /></el-icon>
+                  上传封面
+                </el-button>
+                <span class="cover-tip">（可选）支持 JPG、PNG，建议 1080×1920</span>
+              </el-upload>
+              <div v-else class="cover-preview">
+                <img :src="tab.coverFile.url" class="cover-img" />
+                <div class="cover-info">
+                  <span class="cover-name">{{ tab.coverFile.name }}</span>
+                  <span class="cover-size">{{ (tab.coverFile.size / 1024).toFixed(1) }}KB</span>
+                </div>
+                <el-button type="danger" size="small" @click="tab.coverFile = null">删除</el-button>
+              </div>
+            </div>
           </div>
 
           <!-- 标题输入 -->
@@ -492,7 +522,7 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
-import { Upload, Plus, Close, Folder } from '@element-plus/icons-vue'
+import { Upload, Plus, Close, Folder, Picture } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { useAccountStore } from '@/stores/account'
 import { useAppStore } from '@/stores/app'
@@ -556,7 +586,8 @@ const defaultTabInit = {
   publishStatus: null, // 发布状态，包含message和type
   publishing: false, // 发布状态，用于控制按钮loading效果
   isDraft: false, // 是否保存为草稿，仅视频号平台可见
-  isOriginal: false // 是否标记为原创
+  isOriginal: false, // 是否标记为原创
+  coverFile: null // 封面文件 { name, url, path, size }
 }
 
 // helper to create a fresh deep-copied tab from defaultTabInit
@@ -685,14 +716,37 @@ const handleUploadError = (error) => {
 const removeFile = (tab, index) => {
   // 从文件列表中删除
   tab.fileList.splice(index, 1)
-  
+
   // 更新显示列表
   tab.displayFileList = [...tab.fileList.map(item => ({
     name: item.name,
     url: item.url
   }))]
-  
+
   ElMessage.success('文件删除成功')
+}
+
+// 处理封面上传
+const handleCoverChange = (uploadFile, tab) => {
+  const file = uploadFile.raw
+  if (!file) return
+
+  if (file.size > 5 * 1024 * 1024) {
+    ElMessage.error('封面大小不能超过 5MB')
+    return
+  }
+
+  // 生成预览 URL
+  const reader = new FileReader()
+  reader.onload = (e) => {
+    tab.coverFile = {
+      name: file.name,
+      url: e.target.result,
+      size: file.size,
+      rawFile: file
+    }
+  }
+  reader.readAsDataURL(file)
 }
 
 // 话题相关方法
@@ -824,7 +878,25 @@ const confirmPublish = async (tab) => {
     category: tab.isOriginal ? 1 : 0, // 1表示原创，0表示非原创
     productLink: tab.productLink.trim() || '',
     productTitle: tab.productTitle.trim() || '',
-    isDraft: tab.isDraft
+    isDraft: tab.isDraft,
+    thumbnail: '' // 默认空，后边有封面则覆盖
+  }
+
+  // 如果有封面，先上传封面图片
+  if (tab.coverFile && tab.selectedPlatform === 3) {
+    try {
+      const formData = new FormData()
+      // 将 base64 转回文件
+      const coverData = tab.coverFile.url.split(',')[1]
+      const coverBlob = await fetch(`data:image/png;base64,${coverData}`).then(r => r.blob())
+      formData.append('file', coverBlob, tab.coverFile.name)
+      const coverRes = await http.post('/upload', formData, false)
+      if (coverRes && coverRes.data) {
+        publishData.thumbnail = coverRes.data
+      }
+    } catch (e) {
+      console.warn('封面上传失败，继续发布:', e)
+    }
   }
 
   // 调用后端发布API（使用统一的http封装）

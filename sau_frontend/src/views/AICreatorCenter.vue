@@ -94,7 +94,7 @@
               :limit="1"
             >
               <div v-if="!videoFile">
-                <el-icon class="el-icon--upload"><VideoPlayer /></el-icon>
+                <el-icon class="el-icon--upload"><VideoCamera /></el-icon>
                 <div class="el-upload__text">拖拽视频到此处，或<em>点击上传</em></div>
                 <div class="upload-tip">支持 MP4、AVI、MOV，不超过 500MB</div>
               </div>
@@ -238,7 +238,7 @@
 <script setup>
 import { ref, computed, reactive } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Upload, VideoPlayer, Check } from '@element-plus/icons-vue'
+import { Upload, VideoCamera, Check } from '@element-plus/icons-vue';
 
 // ============ 状态 ============
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5409'

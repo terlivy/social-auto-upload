@@ -21,6 +21,11 @@
           </div>
         </div>
         <div class="tab-actions">
+          <el-button size="small" @click="showDrafts = !showDrafts" :type="showDrafts ? 'warning' : 'default'">
+            <el-icon><Collection /></el-icon>
+            {{ showDrafts ? '收起草稿' : '草稿箱' }}
+            <el-badge :value="drafts.length" :hidden="drafts.length === 0" class="draft-badge" />
+          </el-button>
           <el-button 
             type="primary" 
             size="small" 
@@ -39,6 +44,22 @@
           >
             批量发布
           </el-button>
+        </div>
+      </div>
+
+      <!-- 草稿箱 -->
+      <div v-if="showDrafts && drafts.length > 0" class="drafts-panel">
+        <div class="drafts-list">
+          <div v-for="draft in drafts" :key="draft.tab_key" class="draft-item">
+            <div class="draft-info">
+              <span class="draft-title">{{ draft.title || '未命名草稿' }}</span>
+              <span class="draft-time">{{ formatTime(draft.updated_at) }}</span>
+            </div>
+            <div class="draft-actions">
+              <el-button size="small" type="primary" plain @click="restoreDraft(draft)">恢复</el-button>
+              <el-button size="small" type="danger" plain @click="removeDraft(draft.tab_key)">删除</el-button>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -375,6 +396,7 @@
               placeholder="请输入标题"
               maxlength="100"
               show-word-limit
+              @input="autoSaveDraft(tab)"
               class="title-input"
             />
           </div>
@@ -517,12 +539,34 @@
         </div>
       </div>
     </div>
+    <!-- 发布记录 -->
+    <div class="publish-records-section">
+      <div class="records-header" @click="showRecords = !showRecords">
+        <span>📋 发布记录</span>
+        <el-icon><ArrowDown /></el-icon>
+      </div>
+      <div v-if="showRecords" class="records-list">
+        <div v-if="publishRecords.length === 0" class="records-empty">暂无发布记录</div>
+        <div v-for="record in publishRecords" :key="record.id" class="record-item">
+          <div class="record-status">
+            <el-tag v-if="record.status === 1" type="success" size="small">成功</el-tag>
+            <el-tag v-else-if="record.status === 2" type="danger" size="small">失败</el-tag>
+            <el-tag v-else type="info" size="small">进行中</el-tag>
+          </div>
+          <div class="record-info">
+            <span class="record-title">{{ record.title }}</span>
+            <span class="record-meta">{{ platformName(record.platform) }} · {{ record.account_name }} · {{ formatTime(record.created_at) }}</span>
+          </div>
+          <div v-if="record.error_msg" class="record-error">{{ record.error_msg }}</div>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
-import { Upload, Plus, Close, Folder, Picture } from '@element-plus/icons-vue'
+import { Upload, Plus, Close, Folder, Picture, Collection, ArrowDown } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { useAccountStore } from '@/stores/account'
 import { useAppStore } from '@/stores/app'
@@ -567,6 +611,14 @@ const platforms = [
   { key: 2, name: '视频号' },
   { key: 1, name: '小红书' }
 ]
+
+// 草稿箱
+const showDrafts = ref(false)
+const drafts = ref([])
+
+// 发布记录
+const showRecords = ref(true)
+const publishRecords = ref([])
 
 const defaultTabInit = {
   name: 'tab1',
@@ -900,12 +952,16 @@ const confirmPublish = async (tab) => {
   }
 
   // 调用后端发布API（使用统一的http封装）
+  // 先创建发布记录
+  const recordId = await createPublishRecord(tab)
   try {
     const data = await http.post('/postVideo', publishData)
     tab.publishStatus = {
       message: '发布成功',
       type: 'success'
     }
+    // 更新发布记录为成功
+    if (recordId) await finishPublishRecord(recordId, 1)
     // 清空当前tab的数据
     tab.fileList = []
     tab.displayFileList = []
@@ -915,10 +971,13 @@ const confirmPublish = async (tab) => {
     tab.scheduleEnabled = false
   } catch (error) {
     console.error('发布错误:', error)
+    const errMsg = error.message || '请检查网络连接'
     tab.publishStatus = {
-      message: `发布失败：${error.message || '请检查网络连接'}`,
+      message: `发布失败：${errMsg}`,
       type: 'error'
     }
+    // 更新发布记录为失败
+    if (recordId) await finishPublishRecord(recordId, 2, errMsg)
     throw error
   } finally {
     tab.publishing = false
@@ -1086,6 +1145,139 @@ const batchPublish = async () => {
     isCancelled.value = false
   }
 }
+
+// ========== 发布记录 & 草稿 ==========
+
+const formatTime = (ts) => {
+  if (!ts) return ''
+  const d = new Date(ts)
+  return `${d.getMonth()+1}月${d.getDate()}日 ${d.getHours().toString().padStart(2,'0')}:${d.getMinutes().toString().padStart(2,'0')}`
+}
+
+const platformName = (key) => {
+  const m = { 1: '小红书', 2: '视频号', 3: '抖音', 4: '快手' }
+  return m[key] || key
+}
+
+// 加载发布记录
+const loadPublishRecords = async () => {
+  try {
+    const res = await fetch(`${apiBaseUrl}/getPublishRecords`)
+    const data = await res.json()
+    if (data.code === 200) publishRecords.value = data.data
+  } catch (e) { console.error('加载发布记录失败', e) }
+}
+
+// 加载草稿
+const loadDrafts = async () => {
+  try {
+    const res = await fetch(`${apiBaseUrl}/getDrafts`)
+    const data = await res.json()
+    if (data.code === 200) drafts.value = data.data
+  } catch (e) { console.error('加载草稿失败', e) }
+}
+
+// 恢复草稿到新Tab
+const restoreDraft = (draft) => {
+  try {
+    const content = JSON.parse(draft.content)
+    const newTab = makeNewTab()
+    Object.assign(newTab, content)
+    newTab.name = `tab${++tabCounter}`
+    newTab.label = `发布${tabCounter}`
+    tabs.push(newTab)
+    activeTab.value = newTab.name
+    // 删除草稿
+    fetch(`${apiBaseUrl}/deleteDraft`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tab_key: draft.tab_key })
+    })
+    drafts.value = drafts.value.filter(d => d.tab_key !== draft.tab_key)
+    ElMessage.success('草稿已恢复')
+  } catch (e) {
+    ElMessage.error('恢复草稿失败')
+  }
+}
+
+// 删除草稿
+const removeDraft = async (tabKey) => {
+  try {
+    await fetch(`${apiBaseUrl}/deleteDraft`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tab_key: tabKey })
+    })
+    drafts.value = drafts.value.filter(d => d.tab_key !== tabKey)
+  } catch (e) { console.error('删除草稿失败', e) }
+}
+
+// 自动保存草稿（debounce）
+let draftTimer = null
+const autoSaveDraft = (tab) => {
+  clearTimeout(draftTimer)
+  draftTimer = setTimeout(async () => {
+    if (!tab.title && (!tab.fileList || tab.fileList.length === 0)) return
+    const { publishing, publishStatus, fileList, displayFileList, ...rest } = tab
+    const payload = {
+      tab_key: tab.name,
+      title: tab.title || '',
+      content: JSON.stringify({ ...rest, fileList, displayFileList }),
+      platform: tab.selectedPlatform
+    }
+    try {
+      await fetch(`${apiBaseUrl}/saveDraft`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      })
+      const existing = drafts.value.find(d => d.tab_key === tab.name)
+      if (!existing) {
+        drafts.value.unshift({ ...payload, updated_at: new Date().toISOString() })
+      }
+    } catch (e) { /* silent */ }
+  }, 2000)
+}
+
+// 保存发布记录（发布前）
+const createPublishRecord = async (tab) => {
+  try {
+    const accountName = tab.selectedAccounts.map(id => {
+      const acc = accountStore.accounts.find(a => a.id === id)
+      return acc ? acc.name : id
+    }).join(',')
+    const res = await fetch(`${apiBaseUrl}/savePublishRecord`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title: tab.title,
+        file_path: tab.fileList[0] || '',
+        platform: tab.selectedPlatform,
+        account_name: accountName
+      })
+    })
+    const data = await res.json()
+    return data.data?.id
+  } catch (e) { return null }
+}
+
+// 更新发布记录状态
+const finishPublishRecord = async (recordId, status, errorMsg = '') => {
+  try {
+    await fetch(`${apiBaseUrl}/updatePublishRecord`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: recordId, status, error_msg: errorMsg })
+    })
+    loadPublishRecords()
+  } catch (e) { /* silent */ }
+}
+
+// 页面加载时获取发布记录和草稿
+onMounted(() => {
+  loadPublishRecords()
+  loadDrafts()
+})
 </script>
 
 <style lang="scss" scoped>
@@ -1484,5 +1676,143 @@ const batchPublish = async () => {
       gap: 12px;
     }
   }
+}
+
+// 草稿箱
+.drafts-panel {
+  background: #f8f9fa;
+  border-top: 1px solid #eee;
+  padding: 12px 16px;
+
+  .drafts-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-height: 200px;
+    overflow-y: auto;
+  }
+
+  .draft-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: white;
+    padding: 8px 12px;
+    border-radius: 6px;
+    border: 1px solid #e8e8e8;
+
+    .draft-info {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      flex: 1;
+      min-width: 0;
+
+      .draft-title {
+        font-size: 13px;
+        font-weight: 500;
+        color: #303133;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .draft-time {
+        font-size: 11px;
+        color: #909399;
+      }
+    }
+
+    .draft-actions {
+      display: flex;
+      gap: 6px;
+      margin-left: 12px;
+    }
+  }
+}
+
+// 发布记录
+.publish-records-section {
+  border-top: 1px solid #e8e8e8;
+  background: #fafafa;
+
+  .records-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 16px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 500;
+    color: #606266;
+    user-select: none;
+
+    &:hover {
+      background: #f0f0f0;
+    }
+  }
+
+  .records-list {
+    padding: 0 16px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-height: 200px;
+    overflow-y: auto;
+  }
+
+  .records-empty {
+    color: #909399;
+    font-size: 12px;
+    text-align: center;
+    padding: 12px 0;
+  }
+
+  .record-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    background: white;
+    padding: 8px 12px;
+    border-radius: 6px;
+    border: 1px solid #eee;
+
+    .record-status {
+      flex-shrink: 0;
+      padding-top: 2px;
+    }
+
+    .record-info {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      flex: 1;
+      min-width: 0;
+
+      .record-title {
+        font-size: 13px;
+        font-weight: 500;
+        color: #303133;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .record-meta {
+        font-size: 11px;
+        color: #909399;
+      }
+    }
+
+    .record-error {
+      font-size: 11px;
+      color: #f56c6c;
+      flex-shrink: 0;
+    }
+  }
+}
+
+.draft-badge {
+  margin-left: 4px;
 }
 </style>

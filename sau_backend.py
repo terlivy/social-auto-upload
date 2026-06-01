@@ -846,6 +846,108 @@ def ai_generate():
         return jsonify({"error": f"生成失败: {str(e)}"}), 500
 
 
+# ========== 发布记录 & 草稿 ==========
+
+@app.route('/getPublishRecords', methods=['GET'])
+def get_publish_records():
+    """获取发布记录"""
+    try:
+        conn = sqlite3.connect(str(BASE_DIR / 'database.db'))
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM publish_records ORDER BY created_at DESC LIMIT 50")
+        rows = cur.fetchall()
+        conn.close()
+        records = [dict(row) for row in rows]
+        return jsonify({"code": 200, "data": records})
+    except Exception as e:
+        return jsonify({"code": 500, "msg": str(e)}), 500
+
+@app.route('/savePublishRecord', methods=['POST'])
+def save_publish_record():
+    """新建发布记录（发布前调用）"""
+    data = request.get_json()
+    try:
+        conn = sqlite3.connect(str(BASE_DIR / 'database.db'))
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO publish_records (title, file_path, platform, account_name, status)
+            VALUES (?, ?, ?, ?, 0)
+        """, (data.get('title'), data.get('file_path'), data.get('platform'), data.get('account_name')))
+        record_id = cur.lastrowid
+        conn.commit()
+        conn.close()
+        return jsonify({"code": 200, "data": {"id": record_id}})
+    except Exception as e:
+        return jsonify({"code": 500, "msg": str(e)}), 500
+
+@app.route('/updatePublishRecord', methods=['POST'])
+def update_publish_record():
+    """更新发布记录状态"""
+    data = request.get_json()
+    try:
+        conn = sqlite3.connect(str(BASE_DIR / 'database.db'))
+        cur = conn.cursor()
+        cur.execute("""
+            UPDATE publish_records SET status=?, error_msg=? WHERE id=?
+        """, (data.get('status'), data.get('error_msg', ''), data.get('id')))
+        conn.commit()
+        conn.close()
+        return jsonify({"code": 200})
+    except Exception as e:
+        return jsonify({"code": 500, "msg": str(e)}), 500
+
+@app.route('/saveDraft', methods=['POST'])
+def save_draft():
+    """保存草稿"""
+    data = request.get_json()
+    try:
+        conn = sqlite3.connect(str(BASE_DIR / 'database.db'))
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO drafts (tab_key, title, content, platform, updated_at)
+            VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(tab_key) DO UPDATE SET
+                title=excluded.title,
+                content=excluded.content,
+                platform=excluded.platform,
+                updated_at=CURRENT_TIMESTAMP
+        """, (data.get('tab_key'), data.get('title'), data.get('content'), data.get('platform')))
+        conn.commit()
+        conn.close()
+        return jsonify({"code": 200})
+    except Exception as e:
+        return jsonify({"code": 500, "msg": str(e)}), 500
+
+@app.route('/getDrafts', methods=['GET'])
+def get_drafts():
+    """获取所有草稿"""
+    try:
+        conn = sqlite3.connect(str(BASE_DIR / 'database.db'))
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM drafts ORDER BY updated_at DESC")
+        rows = cur.fetchall()
+        conn.close()
+        drafts = [dict(row) for row in rows]
+        return jsonify({"code": 200, "data": drafts})
+    except Exception as e:
+        return jsonify({"code": 500, "msg": str(e)}), 500
+
+@app.route('/deleteDraft', methods=['POST'])
+def delete_draft():
+    """删除草稿"""
+    data = request.get_json()
+    try:
+        conn = sqlite3.connect(str(BASE_DIR / 'database.db'))
+        cur = conn.cursor()
+        cur.execute("DELETE FROM drafts WHERE tab_key=?", (data.get('tab_key'),))
+        conn.commit()
+        conn.close()
+        return jsonify({"code": 200})
+    except Exception as e:
+        return jsonify({"code": 500, "msg": str(e)}), 500
+
 # ========== end AI 创作者中心 ==========
 
 if __name__ == '__main__':
